@@ -1,0 +1,15 @@
+{
+    "C_Cpp.intelliSenseEngine": "default",
+    "idf.espIdfPathWin": "d:\\esp\\v5.4.1\\esp-idf",
+    "idf.pythonInstallPath": "d:\\.espressif\\tools\\idf-python\\3.11.2\\python.exe",
+    "idf.openOcdConfigs": [
+        "board/esp32-bridge.cfg"
+    ],
+    "idf.toolsPathWin": "d:\\.espressif",
+    "files.associations": {
+        "*.py": "python",
+        "esp_adc_cal.h": "c"
+    },
+    "idf.flashType": "UART",
+    "idf.portWin": "COM4"
+}
