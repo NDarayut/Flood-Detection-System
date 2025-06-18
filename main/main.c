@@ -27,6 +27,9 @@
 // Buzzer pin (PWM capable)
 #define BUZZER_PIN GPIO_NUM_15
 
+#define BUZZER_CHANNEL  LEDC_CHANNEL_3
+#define BUZZER_FREQ     2000  // 2 kHz tone
+
 static const char *TAG = "ULTRASONIC_RGB_BUZZER";
 
 void set_rgb(uint8_t red, uint8_t green, uint8_t blue) {
@@ -72,17 +75,37 @@ void rgb_pwm_init() {
 }
 
 void buzzer_init() {
-    gpio_reset_pin(BUZZER_PIN);
-    gpio_set_direction(BUZZER_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_level(BUZZER_PIN, 0);  // off initially
+    ledc_timer_config_t buzzer_timer = {
+        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .timer_num = LEDC_TIMER_1,
+        .duty_resolution = PWM_RESOLUTION,
+        .freq_hz = BUZZER_FREQ,
+        .clk_cfg = LEDC_AUTO_CLK
+    };
+    ledc_timer_config(&buzzer_timer);
+
+    ledc_channel_config_t buzzer_channel = {
+        .channel    = BUZZER_CHANNEL,
+        .duty       = 0,  // start silent
+        .gpio_num   = BUZZER_PIN,
+        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .hpoint     = 0,
+        .timer_sel  = LEDC_TIMER_1
+    };
+    ledc_channel_config(&buzzer_channel);
 }
 
+
 void buzzer_beep(uint32_t beep_ms, uint32_t pause_ms) {
-    gpio_set_level(BUZZER_PIN, 1);
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, BUZZER_CHANNEL, 128);  // 50% duty
+    ledc_update_duty(LEDC_HIGH_SPEED_MODE, BUZZER_CHANNEL);
     vTaskDelay(pdMS_TO_TICKS(beep_ms));
-    gpio_set_level(BUZZER_PIN, 0);
+
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, BUZZER_CHANNEL, 0);    // silent
+    ledc_update_duty(LEDC_HIGH_SPEED_MODE, BUZZER_CHANNEL);
     vTaskDelay(pdMS_TO_TICKS(pause_ms));
 }
+
 
 void ultrasonic_init() {
     gpio_set_direction(TRIG_PIN, GPIO_MODE_OUTPUT);
@@ -139,7 +162,9 @@ void app_main() {
                 buzzer_beep(500, 500);
             } else {
                 set_rgb(0, 255, 0);     // Green = far/safe
-                gpio_set_level(BUZZER_PIN, 0);  // Buzzer off
+                ledc_set_duty(LEDC_HIGH_SPEED_MODE, BUZZER_CHANNEL, 0);
+                ledc_update_duty(LEDC_HIGH_SPEED_MODE, BUZZER_CHANNEL);
+
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
         }
