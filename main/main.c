@@ -3,130 +3,145 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
-#include "driver/adc.h"
-#include "esp_adc_cal.h"
-#include "esp_log.h"
-#include "esp_rom_sys.h"
 #include "esp_timer.h"
+#include "esp_log.h"
+#include "esp_err.h"
 
-
+// Ultrasonic pins
 #define TRIG_PIN GPIO_NUM_4
 #define ECHO_PIN GPIO_NUM_5
 
-#define RED_PIN  GPIO_NUM_25
-#define GREEN_PIN GPIO_NUM_26
-#define BLUE_PIN GPIO_NUM_27
+// RGB LED PWM pins
+#define RED_PIN    GPIO_NUM_25
+#define GREEN_PIN  GPIO_NUM_26
+#define BLUE_PIN   GPIO_NUM_27
 
+#define PWM_FREQ       5000     // 5 kHz
+#define PWM_RESOLUTION LEDC_TIMER_8_BIT  // 8-bit = duty 0–255
+
+// LEDC channels for RGB
+#define RED_CHANNEL     LEDC_CHANNEL_0
+#define GREEN_CHANNEL   LEDC_CHANNEL_1
+#define BLUE_CHANNEL    LEDC_CHANNEL_2
+
+// Buzzer pin (PWM capable)
 #define BUZZER_PIN GPIO_NUM_15
 
-#define LDR_ADC_CHANNEL ADC1_CHANNEL_0  // GPIO36 (A0) → ADC1_CH0
+static const char *TAG = "ULTRASONIC_RGB_BUZZER";
 
-void init_adc() {
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(LDR_ADC_CHANNEL, ADC_ATTEN_DB_11);
+void set_rgb(uint8_t red, uint8_t green, uint8_t blue) {
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, RED_CHANNEL, red);
+    ledc_update_duty(LEDC_HIGH_SPEED_MODE, RED_CHANNEL);
+
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, GREEN_CHANNEL, green);
+    ledc_update_duty(LEDC_HIGH_SPEED_MODE, GREEN_CHANNEL);
+
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, BLUE_CHANNEL, blue);
+    ledc_update_duty(LEDC_HIGH_SPEED_MODE, BLUE_CHANNEL);
 }
 
-// Reads the LDR value from the ADC channel
-int read_ldr() {
-    return adc1_get_raw(LDR_ADC_CHANNEL);
-}
+void rgb_pwm_init() {
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .timer_num = LEDC_TIMER_0,
+        .duty_resolution = PWM_RESOLUTION,
+        .freq_hz = PWM_FREQ,
+        .clk_cfg = LEDC_AUTO_CLK
+    };
+    ledc_timer_config(&ledc_timer);
 
-float get_distance_cm(){
-        
-    esp_rom_delay_us(2);
-    gpio_set_level(TRIG_PIN, 1);
-    esp_rom_delay_us(10);
-    gpio_set_level(TRIG_PIN, 0);
-    gpio_set_level(TRIG_PIN, 0);
-
-    uint32_t start_time = esp_timer_get_time();
-    while (gpio_get_level(ECHO_PIN) == 0) {
-        if (esp_timer_get_time() - start_time > 100000) return -1;
-    }
-
-    uint32_t echo_start = esp_timer_get_time();
-    while (gpio_get_level(ECHO_PIN) == 1) {
-        if (esp_timer_get_time() - echo_start > 100000) return -1;
-    }
-    uint32_t echo_end = esp_timer_get_time();
-
-    float duration_us = echo_end - echo_start;
-    return (duration_us / 2.0) * 0.0343;
-};
-
-void init_pwm_led(gpio_num_t pin, ledc_channel_t channel)
-{
-    ledc_channel_config_t ledc_channel = {
-        .channel    = channel,
+    ledc_channel_config_t red_channel = {
+        .channel    = RED_CHANNEL,
         .duty       = 0,
-        .gpio_num   = pin,
+        .gpio_num   = RED_PIN,
         .speed_mode = LEDC_HIGH_SPEED_MODE,
         .hpoint     = 0,
         .timer_sel  = LEDC_TIMER_0
     };
-    ledc_channel_config(&ledc_channel);
+    ledc_channel_config(&red_channel);
+
+    ledc_channel_config_t green_channel = red_channel;
+    green_channel.channel = GREEN_CHANNEL;
+    green_channel.gpio_num = GREEN_PIN;
+    ledc_channel_config(&green_channel);
+
+    ledc_channel_config_t blue_channel = red_channel;
+    blue_channel.channel = BLUE_CHANNEL;
+    blue_channel.gpio_num = BLUE_PIN;
+    ledc_channel_config(&blue_channel);
 }
 
-void set_rgb_color(uint8_t r, uint8_t g, uint8_t b)
-{
-    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, r * 4);
-    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
-
-    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1, g * 4);
-    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1);
-
-    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_2, b * 4);
-    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_2);
+void buzzer_init() {
+    gpio_reset_pin(BUZZER_PIN);
+    gpio_set_direction(BUZZER_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(BUZZER_PIN, 0);  // off initially
 }
 
-void play_buzzer()
-{
+void buzzer_beep(uint32_t beep_ms, uint32_t pause_ms) {
     gpio_set_level(BUZZER_PIN, 1);
-    vTaskDelay(pdMS_TO_TICKS(300));
+    vTaskDelay(pdMS_TO_TICKS(beep_ms));
     gpio_set_level(BUZZER_PIN, 0);
+    vTaskDelay(pdMS_TO_TICKS(pause_ms));
 }
 
-void app_main(void)
-{
-    // GPIO direction setup
+void ultrasonic_init() {
     gpio_set_direction(TRIG_PIN, GPIO_MODE_OUTPUT);
     gpio_set_direction(ECHO_PIN, GPIO_MODE_INPUT);
-    gpio_set_direction(BUZZER_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(TRIG_PIN, 0);
+    ESP_LOGI(TAG, "Ultrasonic initialized");
+    vTaskDelay(pdMS_TO_TICKS(100));
+}
 
-    init_adc();
+float ultrasonic_get_distance_cm() {
+    gpio_set_level(TRIG_PIN, 0);
+    esp_rom_delay_us(2);
+    gpio_set_level(TRIG_PIN, 1);
+    esp_rom_delay_us(5);
+    gpio_set_level(TRIG_PIN, 0);
 
-    // --- LEDC Timer Setup ---
-    ledc_timer_config_t ledc_timer = {
-        .duty_resolution = LEDC_TIMER_10_BIT,
-        .freq_hz = 5000,
-        .speed_mode = LEDC_HIGH_SPEED_MODE,
-        .timer_num = LEDC_TIMER_0
-    };
-    ledc_timer_config(&ledc_timer);
-
-    // --- RGB Channel Init ---
-    init_pwm_led(RED_PIN, LEDC_CHANNEL_0);
-    init_pwm_led(GREEN_PIN, LEDC_CHANNEL_1);
-    init_pwm_led(BLUE_PIN, LEDC_CHANNEL_2);
-
-    while (1) {
-        float distance = get_distance_cm();
-        int light = read_ldr();
-
-        ESP_LOGI("Sensor", "Distance: %.2f cm, Light: %d", distance, light);
-
-        if (distance < 10) {
-            set_rgb_color(255, 0, 0); // Red
-            play_buzzer();
-        } else if (distance < 20) {
-            set_rgb_color(255, 165, 0); // Orange-ish
-            play_buzzer();
-        } else {
-            set_rgb_color(0, 255, 0); // Green
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    uint64_t start = esp_timer_get_time();
+    while (gpio_get_level(ECHO_PIN) == 0) {
+        if ((esp_timer_get_time() - start) > 30000) return -1;
     }
 
+    uint64_t echo_start = esp_timer_get_time();
+    while (gpio_get_level(ECHO_PIN) == 1) {
+        if ((esp_timer_get_time() - echo_start) > 30000) return -1;
+    }
 
+    uint64_t echo_end = esp_timer_get_time();
+    float distance_cm = (echo_end - echo_start) * 0.0343 / 2.0;
+    return distance_cm;
+}
+
+void app_main() {
+    rgb_pwm_init();
+    buzzer_init();
+    ultrasonic_init();
+
+    while (1) {
+        float distance = ultrasonic_get_distance_cm();
+
+        if (distance < 0) {
+            ESP_LOGW(TAG, "Failed to read distance");
+            set_rgb(0, 0, 255);  // Blue = error
+            gpio_set_level(BUZZER_PIN, 0);  // Buzzer off
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        } else {
+            ESP_LOGI(TAG, "Distance: %.2f cm", distance);
+            if (distance < 3.0) {
+                set_rgb(255, 0, 0);     // Red = very close
+                // Fast beep: 150ms on, 150ms off
+                buzzer_beep(150, 150);
+            } else if (distance < 4.0) {
+                set_rgb(255, 255, 0);   // Yellow = medium
+                // Slow beep: 500ms on, 500ms off
+                buzzer_beep(500, 500);
+            } else {
+                set_rgb(0, 255, 0);     // Green = far/safe
+                gpio_set_level(BUZZER_PIN, 0);  // Buzzer off
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+        }
+    }
 }
