@@ -6,6 +6,7 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "driver/adc.h"
 
 // Ultrasonic pins
 #define TRIG_PIN GPIO_NUM_4
@@ -30,7 +31,13 @@
 #define BUZZER_CHANNEL  LEDC_CHANNEL_3
 #define BUZZER_FREQ     2000  // 2 kHz tone
 
+#define LDR_GPIO GPIO_NUM_34  // DO pin connected here
+
 static const char *TAG = "ULTRASONIC_RGB_BUZZER";
+
+void ldr_init() {
+    gpio_set_direction(LDR_GPIO, GPIO_MODE_INPUT);
+}
 
 void set_rgb(uint8_t red, uint8_t green, uint8_t blue) {
     ledc_set_duty(LEDC_HIGH_SPEED_MODE, RED_CHANNEL, red);
@@ -137,12 +144,27 @@ float ultrasonic_get_distance_cm() {
     return distance_cm;
 }
 
+int read_ldr() {
+    int value = gpio_get_level(LDR_GPIO);  // 0 = DARK, 1 = LIGHT
+    ESP_LOGI(TAG, "LDR Digital Output: %d", value);
+    return value;
+}
+
 void app_main() {
+    ldr_init();
     rgb_pwm_init();
     buzzer_init();
     ultrasonic_init();
 
     while (1) {
+        int ldr_value = read_ldr();
+        bool is_day = (ldr_value == 0);  // HIGH = more light
+
+        if (is_day) {
+            ESP_LOGI(TAG, "It is DAY");
+        } else {
+            ESP_LOGI(TAG, "It is NIGHT");
+        }
         float distance = ultrasonic_get_distance_cm();
 
         if (distance < 0) {
