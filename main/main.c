@@ -25,6 +25,7 @@
 #include "esp_netif.h"
 #include "esp_http_client.h"
 #include "nvs_flash.h"
+#include <math.h>
 
 /*------------------------------------------------------------------------------
  PROGRAM CONSTANTS
@@ -56,8 +57,8 @@
 #define LDR_GPIO      GPIO_NUM_34
 
 // WiFi Connection and ThingSpeak API
-#define WIFI_SSID "CDR Cambodia"
-#define WIFI_PASSWORD "Darey0864"
+#define WIFI_SSID "TGI-STUDENT"
+#define WIFI_PASSWORD "tgi@@StuDent2024"
 
 #define API_KEY "DNXC7HGIKZAR6XO4" // Write API Key from ThingSpeak
 
@@ -69,6 +70,7 @@
 /*------------------------------------------------------------------------------
  FUNCTION DECLARATIONS
 ------------------------------------------------------------------------------*/
+
 void ldr_init(void);
 void rgb_pwm_init(void);
 void buzzer_init(void);
@@ -87,6 +89,8 @@ void send_to_thingspeak(int distance, int led_state, int is_night);
 void app_main(void) {
 
     int led_state;
+    float danger_distance = 3.5f; // Distance threshold for danger
+    float warning_distance = 5.0f; // Distance threshold for warning alert
 
     // Initialize hardware components
     ldr_init();
@@ -120,16 +124,20 @@ void app_main(void) {
             continue;
         }
 
-        printf("Distance: %.2f cm\n", distance);
+        printf("Distance from sensor: %.2f cm\n", distance);
 
-        if (distance < 3.0f) {
+        // Calculate how high the water is
+        float water_level = fmaxf(0.0f, 7.65f - distance);
+        printf("Water Level: %.2f cm\n", water_level);
+
+        if (distance < danger_distance) {
             set_rgb(255, 0, 0);     // Red = very close
-            buzzer_beep(100, 100);  // Fast beep
+            buzzer_beep(100, 50);  // Fast beep
             led_state = 1;
         } 
-        else if (distance < 4.0f) {
+        else if (distance < warning_distance) {
             set_rgb(255, 255, 0);   // Yellow = medium distance
-            buzzer_beep(500, 500);  // Slow beep
+            buzzer_beep(100, 900);  // Slow beep
             led_state = 2;
         } 
         else {
@@ -140,9 +148,9 @@ void app_main(void) {
             led_state = 3;
         }
 
-        // Send data to ThingSpeak (for example, distance and LDR value)
-        send_to_thingspeak((int)distance, led_state, is_night);
-        //vTaskDelay(pdMS_TO_TICKS(500)); // Reduce to 500 ms or less to allow faster beeping
+        // Send data to ThingSpeak 
+        send_to_thingspeak((int)(water_level * 10), led_state, is_night);
+        vTaskDelay(pdMS_TO_TICKS(500)); // Reduce to 500 ms 
     }
 }
 
@@ -168,6 +176,7 @@ void rgb_pwm_init(void) {
         .freq_hz          = PWM_FREQ,
         .clk_cfg          = LEDC_AUTO_CLK
     };
+
     ledc_timer_config(&ledc_timer);
 
     ledc_channel_config_t base_channel = {
@@ -211,6 +220,7 @@ void buzzer_init(void) {
         .hpoint     = 0,
         .timer_sel  = LEDC_TIMER_1
     };
+
     ledc_channel_config(&buzzer_channel);
 }
 
@@ -264,17 +274,21 @@ void buzzer_beep(uint32_t beep_ms, uint32_t pause_ms) {
 float ultrasonic_get_distance_cm(void) {
     gpio_set_level(TRIG_PIN, 0);
     esp_rom_delay_us(2);
-    gpio_set_level(TRIG_PIN, 1);
+    gpio_set_level(TRIG_PIN, 1); // It sends a pulse and set ECHO to high internally
     esp_rom_delay_us(5);
     gpio_set_level(TRIG_PIN, 0);
 
     uint64_t start = esp_timer_get_time();
     while (gpio_get_level(ECHO_PIN) == 0) {
+        // This loop waits for the ECHO pin to go high, if 30ms passed, return -1
+        // which means no sound wave detected
         if ((esp_timer_get_time() - start) > 30000) return -1;
     }
 
     uint64_t echo_start = esp_timer_get_time();
     while (gpio_get_level(ECHO_PIN) == 1) {
+        // This loop waits for the ECHO pin to go low, meaning it mark the start of sound wave
+        // travelling back to the sensor
         if ((esp_timer_get_time() - echo_start) > 30000) return -1;
     }
 
